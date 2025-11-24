@@ -22,4 +22,3 @@ func Execute() error {
 	rootCmd.SetErr(os.Stderr)
 	return rootCmd.Execute()
 }
-
