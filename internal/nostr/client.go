@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/gorilla/websocket"
@@ -77,6 +78,73 @@ func (c *Client) Stream(ctx context.Context, relay string, filter Filter) (<-cha
 	}()
 
 	return events, errs
+}
+
+// Publish sends a single event to the specified relay and waits for an OK response.
+func (c *Client) Publish(ctx context.Context, relay string, evt Event) error {
+	conn, _, err := c.dialer.DialContext(ctx, relay, nil)
+	if err != nil {
+		return fmt.Errorf("dial %s: %w", relay, err)
+	}
+	defer conn.Close()
+
+	if err := conn.WriteJSON([]any{"EVENT", evt}); err != nil {
+		return fmt.Errorf("write EVENT: %w", err)
+	}
+
+	// Wait for one OK message with a bounded timeout.
+	if deadline, ok := ctx.Deadline(); ok {
+		_ = conn.SetReadDeadline(deadline)
+	} else {
+		_ = conn.SetReadDeadline(time.Now().Add(c.readTimeout))
+	}
+
+	_, data, err := conn.ReadMessage()
+	if err != nil {
+		return fmt.Errorf("read OK: %w", err)
+	}
+
+	var payload []json.RawMessage
+	if err := json.Unmarshal(data, &payload); err != nil {
+		return fmt.Errorf("unmarshal OK payload: %w", err)
+	}
+	if len(payload) < 4 {
+		return fmt.Errorf("invalid OK message: %s", string(data))
+	}
+
+	var msgType string
+	if err := json.Unmarshal(payload[0], &msgType); err != nil {
+		return fmt.Errorf("decode OK type: %w", err)
+	}
+	if msgType != "OK" {
+		return fmt.Errorf("unexpected message type: %s", msgType)
+	}
+
+	var recvID string
+	if err := json.Unmarshal(payload[1], &recvID); err != nil {
+		return fmt.Errorf("decode OK id: %w", err)
+	}
+
+	var ok bool
+	if err := json.Unmarshal(payload[2], &ok); err != nil {
+		return fmt.Errorf("decode OK flag: %w", err)
+	}
+
+	var msg string
+	if err := json.Unmarshal(payload[3], &msg); err != nil {
+		return fmt.Errorf("decode OK message: %w", err)
+	}
+
+	if !ok {
+		return fmt.Errorf("relay %s rejected event %s: %s", relay, recvID, msg)
+	}
+
+	if recvID != "" && !strings.EqualFold(recvID, evt.ID) {
+		return fmt.Errorf("relay %s returned mismatched id: %s", relay, recvID)
+	}
+
+	c.logger.Info("published event", "relay", relay, "id", evt.ID)
+	return nil
 }
 
 func (c *Client) runSubscription(ctx context.Context, conn *websocket.Conn, relay string, filter Filter, events chan<- Event) error {
