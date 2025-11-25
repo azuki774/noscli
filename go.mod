@@ -4,6 +4,7 @@ go 1.25.4
 
 require (
 	github.com/btcsuite/btcd/btcec/v2 v2.3.6
+	github.com/btcsuite/btcutil v1.0.2
 	github.com/gorilla/websocket v1.5.3
 	github.com/spf13/cobra v1.10.1
 )

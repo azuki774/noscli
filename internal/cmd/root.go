@@ -33,7 +33,10 @@ var rootCmd = &cobra.Command{
 
 func init() {
 	rootCmd.PersistentFlags().BoolVarP(&verbose, "verbose", "v", false, "詳細ログを表示する")
-	rootCmd.AddCommand(newTimelineCommand())
+	rootCmd.AddCommand(
+		newTimelineCommand(),
+		newPostCommand(),
+	)
 }
 
 // Execute runs the root command.

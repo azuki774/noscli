@@ -119,3 +119,71 @@ func computeEventHash(t *testing.T, evt Event) [32]byte {
 
 	return sha256.Sum256(serialized)
 }
+
+func TestSignEvent(t *testing.T) {
+	keyBytes := bytes.Repeat([]byte{0x01}, 32)
+	priv, _ := btcec.PrivKeyFromBytes(keyBytes)
+	pubKeyBytes := schnorr.SerializePubKey(priv.PubKey())
+
+	base := Event{
+		PubKey:    hex.EncodeToString(pubKeyBytes),
+		CreatedAt: 1_700_000_000,
+		Kind:      KindTextNote,
+		Tags:      [][]string{{"t", "nostr"}},
+		Content:   "hello nostr",
+	}
+
+	tests := []struct {
+		name       string
+		privKey    []byte
+		wantErr    bool
+		errMessage string
+	}{
+		{
+			name:    "valid private key",
+			privKey: keyBytes,
+		},
+		{
+			name:       "invalid private key length",
+			privKey:    []byte{0x01, 0x02},
+			wantErr:    true,
+			errMessage: "invalid private key length",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			evt := base
+			err := SignEvent(&evt, tt.privKey)
+			if tt.wantErr {
+				if err == nil {
+					t.Fatalf("SignEvent() expected error")
+				}
+				if tt.errMessage != "" && !strings.Contains(err.Error(), tt.errMessage) {
+					t.Fatalf("SignEvent() error %q does not contain %q", err.Error(), tt.errMessage)
+				}
+				return
+			}
+
+			if err != nil {
+				t.Fatalf("SignEvent() unexpected error: %v", err)
+			}
+			if evt.ID == "" {
+				t.Fatalf("expected ID to be set")
+			}
+			if evt.Sig == "" {
+				t.Fatalf("expected Sig to be set")
+			}
+
+			hash := computeEventHash(t, evt)
+			expectedID := hex.EncodeToString(hash[:])
+			if !strings.EqualFold(expectedID, evt.ID) {
+				t.Fatalf("unexpected ID: got %s, want %s", evt.ID, expectedID)
+			}
+
+			if err := evt.Verify(); err != nil {
+				t.Fatalf("Verify() failed after SignEvent: %v", err)
+			}
+		})
+	}
+}

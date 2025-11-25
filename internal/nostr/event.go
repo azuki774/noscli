@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/btcsuite/btcd/btcec/v2"
 	"github.com/btcsuite/btcd/btcec/v2/schnorr"
 )
 
@@ -34,13 +35,11 @@ func (e Event) CreatedAtTime() time.Time {
 
 // Verify ensures the event ID and signature are valid.
 func (e Event) Verify() error {
-	payload := []any{0, e.PubKey, e.CreatedAt, e.Kind, e.Tags, e.Content}
-	serialized, err := json.Marshal(payload)
+	hash, err := hashEvent(e)
 	if err != nil {
-		return fmt.Errorf("marshal payload: %w", err)
+		return err
 	}
 
-	hash := sha256.Sum256(serialized)
 	expected := hex.EncodeToString(hash[:])
 	if !strings.EqualFold(expected, e.ID) {
 		return errors.New("event id mismatch")
@@ -72,6 +71,39 @@ func (e Event) Verify() error {
 	if !signature.Verify(hash[:], pubKey) {
 		return errors.New("signature verification failed")
 	}
+
+	return nil
+}
+
+// hashEvent calculates the event hash as specified in NIP-01.
+func hashEvent(e Event) ([32]byte, error) {
+	payload := []any{0, e.PubKey, e.CreatedAt, e.Kind, e.Tags, e.Content}
+	serialized, err := json.Marshal(payload)
+	if err != nil {
+		return [32]byte{}, fmt.Errorf("marshal payload: %w", err)
+	}
+	return sha256.Sum256(serialized), nil
+}
+
+// SignEvent computes the event ID and signature using the given private key.
+// privKey is a 32-byte secret key.
+func SignEvent(e *Event, privKey []byte) error {
+	if len(privKey) != 32 {
+		return fmt.Errorf("invalid private key length: %d", len(privKey))
+	}
+
+	hash, err := hashEvent(*e)
+	if err != nil {
+		return err
+	}
+	e.ID = hex.EncodeToString(hash[:])
+
+	sk, _ := btcec.PrivKeyFromBytes(privKey)
+	sig, err := schnorr.Sign(sk, hash[:])
+	if err != nil {
+		return fmt.Errorf("sign: %w", err)
+	}
+	e.Sig = hex.EncodeToString(sig.Serialize())
 
 	return nil
 }

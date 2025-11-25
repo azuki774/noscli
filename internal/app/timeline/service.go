@@ -83,11 +83,11 @@ func renderPlainEvent(w io.Writer, evt nostr.Event) error {
 	ts := time.Unix(evt.CreatedAt, 0).Local().Format("2006-01-02 15:04:05")
 	author := truncateHex(evt.PubKey)
 	summary := sanitizeContent(evt.Content)
-	suffix := evt.ID
-	if len(suffix) > 8 {
-		suffix = suffix[len(suffix)-8:]
+	prefixForPreview := evt.ID
+	if len(prefixForPreview) > 8 {
+		prefixForPreview = prefixForPreview[:8]
 	}
-	_, err := fmt.Fprintf(w, "[%s] %s: %s (id:%s relay:%s)\n", ts, author, summary, suffix, evt.Relay)
+	_, err := fmt.Fprintf(w, "[%s] %s: %s (id:%s relay:%s)\n", ts, author, summary, prefixForPreview, evt.Relay)
 	return err
 }
 
