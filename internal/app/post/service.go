@@ -75,11 +75,11 @@ func (s *Service) Run(ctx context.Context, req Request, w io.Writer) error {
 		return err
 	}
 
-	suffix := evt.ID
-	if len(suffix) > 8 {
-		suffix = suffix[len(suffix)-8:]
+	prefixForPreview := evt.ID
+	if len(prefixForPreview) > 8 {
+		prefixForPreview = prefixForPreview[:8]
 	}
-	if _, err := fmt.Fprintf(w, "published: id:%s relay:%s\n", suffix, req.Relay); err != nil {
+	if _, err := fmt.Fprintf(w, "published: id:%s relay:%s\n", prefixForPreview, req.Relay); err != nil {
 		return err
 	}
 

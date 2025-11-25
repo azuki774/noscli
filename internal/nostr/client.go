@@ -94,8 +94,10 @@ func (c *Client) Publish(ctx context.Context, relay string, evt Event) error {
 
 	// Wait for one OK message with a bounded timeout.
 	if deadline, ok := ctx.Deadline(); ok {
+		// ctx に deadline が設定済ならそれを使う
 		_ = conn.SetReadDeadline(deadline)
 	} else {
+		// 未設定なら、readTimeout 後をタイムアウトの期限とする
 		_ = conn.SetReadDeadline(time.Now().Add(c.readTimeout))
 	}
 
@@ -104,47 +106,65 @@ func (c *Client) Publish(ctx context.Context, relay string, evt Event) error {
 		return fmt.Errorf("read OK: %w", err)
 	}
 
-	var payload []json.RawMessage
-	if err := json.Unmarshal(data, &payload); err != nil {
-		return fmt.Errorf("unmarshal OK payload: %w", err)
-	}
-	if len(payload) < 4 {
-		return fmt.Errorf("invalid OK message: %s", string(data))
+	res, err := parseOKMessage(data)
+	if err != nil {
+		return err
 	}
 
-	var msgType string
-	if err := json.Unmarshal(payload[0], &msgType); err != nil {
-		return fmt.Errorf("decode OK type: %w", err)
-	}
-	if msgType != "OK" {
-		return fmt.Errorf("unexpected message type: %s", msgType)
+	if !res.OK {
+		return fmt.Errorf("relay %s rejected event %s: %s", relay, res.EventID, res.Message)
 	}
 
-	var recvID string
-	if err := json.Unmarshal(payload[1], &recvID); err != nil {
-		return fmt.Errorf("decode OK id: %w", err)
-	}
-
-	var ok bool
-	if err := json.Unmarshal(payload[2], &ok); err != nil {
-		return fmt.Errorf("decode OK flag: %w", err)
-	}
-
-	var msg string
-	if err := json.Unmarshal(payload[3], &msg); err != nil {
-		return fmt.Errorf("decode OK message: %w", err)
-	}
-
-	if !ok {
-		return fmt.Errorf("relay %s rejected event %s: %s", relay, recvID, msg)
-	}
-
-	if recvID != "" && !strings.EqualFold(recvID, evt.ID) {
-		return fmt.Errorf("relay %s returned mismatched id: %s", relay, recvID)
+	if res.EventID != "" && !strings.EqualFold(res.EventID, evt.ID) {
+		return fmt.Errorf("relay %s returned mismatched id: %s", relay, res.EventID)
 	}
 
 	c.logger.Info("published event", "relay", relay, "id", evt.ID)
 	return nil
+}
+
+// okResult represents a parsed Nostr OK message.
+type okResult struct {
+	EventID string
+	OK      bool
+	Message string
+}
+
+// parseOKMessage validates and parses a raw Nostr OK message.
+// Expected format: ["OK", "<event-id>", true|false, "<message>"].
+func parseOKMessage(data []byte) (okResult, error) {
+	var payload []json.RawMessage
+	if err := json.Unmarshal(data, &payload); err != nil {
+		return okResult{}, fmt.Errorf("unmarshal OK payload: %w", err)
+	}
+
+	if len(payload) != 4 {
+		return okResult{}, fmt.Errorf("invalid OK message: %s", string(data))
+	}
+
+	var msgType string
+	if err := json.Unmarshal(payload[0], &msgType); err != nil {
+		return okResult{}, fmt.Errorf("decode OK type: %w", err)
+	}
+	if msgType != "OK" {
+		return okResult{}, fmt.Errorf("unexpected message type: %s", msgType)
+	}
+
+	var res okResult
+
+	if err := json.Unmarshal(payload[1], &res.EventID); err != nil {
+		return okResult{}, fmt.Errorf("decode OK id: %w", err)
+	}
+
+	if err := json.Unmarshal(payload[2], &res.OK); err != nil {
+		return okResult{}, fmt.Errorf("decode OK flag: %w", err)
+	}
+
+	if err := json.Unmarshal(payload[3], &res.Message); err != nil {
+		return okResult{}, fmt.Errorf("decode OK message: %w", err)
+	}
+
+	return res, nil
 }
 
 func (c *Client) runSubscription(ctx context.Context, conn *websocket.Conn, relay string, filter Filter, events chan<- Event) error {
